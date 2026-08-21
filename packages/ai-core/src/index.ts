@@ -32,3 +32,5 @@ export class AiProviderRegistry {
     return provider;
   }
 }
+
+export * from "./command-center/index.js";

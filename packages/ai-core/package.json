@@ -10,6 +10,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test"
   },
+  "dependencies": {
+    "@ai-auto-business/workflow-engine": "workspace:*",
+    "zod": "^3.24.0"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.8.0"

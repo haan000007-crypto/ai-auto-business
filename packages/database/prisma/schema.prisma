@@ -1,0 +1,350 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  INVITED
+}
+
+enum WorkflowVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum WorkflowRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum WorkflowExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  RETRYING
+}
+
+enum WorkflowLogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  displayName   String?
+  status        UserStatus   @default(ACTIVE)
+  emailVerified DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  memberships    Membership[]
+  createdApiKeys ApiKey[]     @relation("ApiKeyCreator")
+  triggeredRuns  WorkflowRun[] @relation("WorkflowRunTriggerUser")
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  passwordHash      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships      Membership[]
+  roles            Role[]
+  workflows        Workflow[]
+  workflowTemplates WorkflowTemplate[]
+  workflowRuns     WorkflowRun[]
+  apiKeys          ApiKey[]
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles        MembershipRole[]
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Role {
+  id             String   @id @default(cuid())
+  organizationId String?
+  code           String
+  name           String
+  description    String?
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  permissions     RolePermission[]
+  membershipRoles MembershipRole[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+}
+
+model MembershipRole {
+  membershipId String
+  roleId       String
+  assignedAt   DateTime @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([membershipId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  grantedAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  createdById    String
+  name           String
+  keyPrefix      String
+  tokenHash      String    @unique
+  scopes         String[]
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, revokedAt])
+}
+
+model Workflow {
+  id               String   @id @default(cuid())
+  organizationId   String
+  key              String
+  name             String
+  description      String?
+  activeVersionId  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  versions       WorkflowVersion[] @relation("WorkflowVersions")
+  activeVersion  WorkflowVersion?  @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  runs           WorkflowRun[]
+
+  @@unique([organizationId, key])
+  @@index([organizationId, updatedAt])
+}
+
+model WorkflowVersion {
+  id            String                @id @default(cuid())
+  workflowId    String
+  version       Int
+  status        WorkflowVersionStatus @default(DRAFT)
+  definition    Json
+  publishedAt   DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  workflow        Workflow       @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  activeFor       Workflow[]     @relation("ActiveWorkflowVersion")
+  nodes           WorkflowNode[]
+  edges           WorkflowEdge[]
+  runs            WorkflowRun[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId, status])
+}
+
+model WorkflowNode {
+  id                String   @id @default(cuid())
+  workflowVersionId String
+  key               String
+  kind              String
+  label             String
+  configuration     Json
+  positionX         Float
+  positionY         Float
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workflowVersion WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  executions      WorkflowExecution[]
+
+  @@unique([workflowVersionId, key])
+  @@index([workflowVersionId, kind])
+}
+
+model WorkflowEdge {
+  id                String   @id @default(cuid())
+  workflowVersionId String
+  key               String
+  sourceNodeKey     String
+  targetNodeKey     String
+  sourceHandle      String?
+  targetHandle      String?
+  condition         Json?
+  createdAt         DateTime @default(now())
+
+  workflowVersion WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowVersionId, key])
+  @@index([workflowVersionId, sourceNodeKey])
+  @@index([workflowVersionId, targetNodeKey])
+}
+
+model WorkflowRun {
+  id                String            @id @default(cuid())
+  organizationId    String
+  workflowId        String
+  workflowVersionId String
+  triggeredById     String?
+  idempotencyKey    String?
+  status            WorkflowRunStatus @default(QUEUED)
+  input             Json?
+  output            Json?
+  error             Json?
+  queuedAt          DateTime          @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdAt         DateTime          @default(now())
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow         Workflow         @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  workflowVersion  WorkflowVersion  @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
+  triggeredBy      User?            @relation("WorkflowRunTriggerUser", fields: [triggeredById], references: [id], onDelete: SetNull)
+  executions       WorkflowExecution[]
+  logs             WorkflowLog[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, status, queuedAt])
+  @@index([workflowId, createdAt])
+}
+
+model WorkflowExecution {
+  id             String                  @id @default(cuid())
+  workflowRunId  String
+  workflowNodeId String?
+  nodeKey        String
+  attempt        Int                     @default(1)
+  status         WorkflowExecutionStatus @default(PENDING)
+  input          Json?
+  output         Json?
+  error          Json?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime                @default(now())
+
+  workflowRun  WorkflowRun   @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+  workflowNode WorkflowNode? @relation(fields: [workflowNodeId], references: [id], onDelete: SetNull)
+  logs         WorkflowLog[]
+
+  @@unique([workflowRunId, nodeKey, attempt])
+  @@index([workflowRunId, status])
+}
+
+model WorkflowLog {
+  id                  String           @id @default(cuid())
+  workflowRunId       String
+  workflowExecutionId String?
+  level               WorkflowLogLevel @default(INFO)
+  event               String
+  message             String
+  context             Json?
+  createdAt           DateTime         @default(now())
+
+  workflowRun       WorkflowRun        @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+  workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id], onDelete: SetNull)
+
+  @@index([workflowRunId, createdAt])
+  @@index([workflowExecutionId, createdAt])
+}
+
+model WorkflowTemplate {
+  id             String   @id @default(cuid())
+  organizationId String?
+  key            String
+  name           String
+  description    String?
+  category       String?
+  definition     Json
+  isPublic       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId, category])
+  @@index([isPublic, category])
+}

@@ -1,0 +1,15 @@
+{
+  "name": "ai-auto-business",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered business automation platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "workers"
+  ],
+  "scripts": {
+    "dev": "docker compose up --build",
+    "test": "echo \"No tests configured yet\""
+  }
+}

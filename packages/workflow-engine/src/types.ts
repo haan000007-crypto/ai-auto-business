@@ -11,6 +11,8 @@ export type WorkflowNodeKind =
   | "ACTION"
   | "CONDITION"
   | "AI"
+  | "IMAGE"
+  | "VIDEO"
   | "DELAY"
   | "INTEGRATION";
 
